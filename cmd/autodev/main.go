@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"autodev/internal/events"
 	"autodev/internal/llm"
 	"autodev/internal/memory"
+	"autodev/internal/mcp"
 	"autodev/internal/pipeline"
 	"autodev/internal/registry"
 	"autodev/internal/tools"
@@ -22,6 +24,7 @@ import (
 func main() {
 	var provider, model, apiKey, agentsDir string
 	var dryRun, failOnce bool
+	var mcpConfigPath string
 	var rootCmd = &cobra.Command{
 		Use:   "autodev",
 		Short: "Autonomous developer agent",
@@ -33,7 +36,7 @@ func main() {
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			task := args[0]
-			return runPipeline(task, provider, model, apiKey, agentsDir, dryRun, failOnce)
+			return runPipeline(task, provider, model, apiKey, agentsDir, dryRun, failOnce, mcpConfigPath)
 		},
 	}
 
@@ -43,6 +46,7 @@ func main() {
 	runCmd.Flags().StringVar(&agentsDir, "agents-dir", "./agents", "Directory containing custom agent YAMLs")
 	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Use mock LLM provider to test workflow")
 	runCmd.Flags().BoolVar(&failOnce, "fail-once", false, "Simulate one LLM failure to test recovery")
+	runCmd.Flags().StringVar(&mcpConfigPath, "mcp-config", "", "Path to MCP Servers JSON config")
 
 	rootCmd.AddCommand(runCmd)
 
@@ -51,7 +55,7 @@ func main() {
 	}
 }
 
-func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, failOnce bool) error {
+func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, failOnce bool, mcpConfigPath string) error {
 	if !dryRun && apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
 	}
@@ -82,6 +86,19 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 	}
 
 	bus := events.NewInMemoryBus()
+	
+	// 加载 MCP 配置
+	var mcpServers []mcp.ServerDef
+	if mcpConfigPath != "" {
+		data, err := os.ReadFile(mcpConfigPath)
+		if err != nil {
+			return fmt.Errorf("failed to read MCP config: %w", err)
+		}
+		if err := json.Unmarshal(data, &mcpServers); err != nil {
+			return fmt.Errorf("failed to parse MCP config JSON: %w", err)
+		}
+	}
+	
 	cfg := &core.Config{ WorkDir: "." }
 
 	// Context Builder (Limits input size to LLM)
@@ -91,6 +108,17 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 
 	toolReg := tools.New()
 	tools.RegisterFileTools(toolReg)
+
+	// 加载 MCP Servers
+	if len(mcpServers) > 0 {
+		log.Printf("Initializing %d MCP server(s)...", len(mcpServers))
+		for _, srv := range mcpServers {
+			log.Printf("Connecting to MCP server: %s (%s)", srv.Name, srv.Command)
+			if err := tools.RegisterMCPServer(toolReg, srv.Command, srv.Args); err != nil {
+				log.Printf("Warning: Failed to load MCP server %s: %v", srv.Name, err)
+			}
+		}
+	}
 
 	// Register Built-in Agents
 	reg := agents.NewRegistry()

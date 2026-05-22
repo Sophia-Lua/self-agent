@@ -1614,7 +1614,18 @@ RegisterFileTools(reg) {
 - `registry.go`: 统一管理 `Tool Definition` 与 `Logic Func`。
 - `fs.go`: 实现了 `write_file` 等基础工具。
 
-### 7.4 Mock 测试与状态机验证 (`internal/llm/mock.go`)
+### 7.5 MCP Client 集成 (`internal/mcp`)
+
+实现了基于 Model Context Protocol (MCP) 的客户端，通过 stdio 协议与外部 MCP Server 通信。
+
+- **Transport (`transport.go`)**: 实现了 Stdio Transport，通过 JSON-RPC 2.0 与子进程交互。支持 Content-Length 头部解析，符合 MCP 规范。
+- **Client (`client.go`)**: 封装了初始化 (`initialize`)、获取工具列表 (`tools/list`) 和调用工具 (`tools/call`) 的流程。
+- **Adapter (`tools/mcp_adapter.go`)**: 允许将 MCP Server 暴露的工具动态注册到内部 `ToolRegistry`。Agent Executor 在遇到这些工具时，会自动通过 Client 转发请求，无需额外代码适配。
+
+```bash
+# Usage
+autodev run "Read /etc/hosts" --mcp-config mcp_servers.json
+```
 
 实现了一个带有故障注入能力的 Mock LLM Provider，专门用于验证 Pipeline 的状态机流转。
 - **特性**: 支持 `FailCount` 配置，模拟第 N 次调用失败；支持模拟 `Mock ToolCalls` 返回。

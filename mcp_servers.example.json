@@ -1,0 +1,7 @@
+[
+  {
+    "name": "filesystem (mock)",
+    "command": "echo",
+    "args": ["{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"echo_test\",\"description\":\"Test tool\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}]}\"}"]
+  }
+]
