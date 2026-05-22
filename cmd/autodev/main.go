@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"autodev/internal/agents"
+	ctxbuilder "autodev/internal/context"
 	"autodev/internal/core"
 	"autodev/internal/events"
 	"autodev/internal/llm"
@@ -83,6 +84,11 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 	bus := events.NewInMemoryBus()
 	cfg := &core.Config{ WorkDir: "." }
 
+	// Context Builder (Limits input size to LLM)
+	ctxBuilder := &ctxbuilder.Builder{
+		MaxTokens: 32000, // Conservative limit
+	}
+
 	toolReg := tools.New()
 	tools.RegisterFileTools(toolReg)
 
@@ -95,6 +101,7 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 		Provider:  prov,
 		SystemPrompt: "You are an expert Lead Developer. Analyze the request and outline the technical steps required.",
 		ToolRegistry: toolReg,
+		Context:      ctxBuilder,
 	})
 	reg.Register(&agents.Executor{
 		AgentID: "agent-developer",
@@ -103,6 +110,7 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 		Provider:  prov,
 		SystemPrompt: "You are an expert AI Coding Agent. Write clean, efficient, and tested Go code.",
 		ToolRegistry: toolReg,
+		Context:      ctxBuilder,
 	})
 	reg.Register(&agents.Executor{
 		AgentID: "agent-tester",
@@ -111,6 +119,7 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 		Provider:  prov,
 		SystemPrompt: "You are an expert QA Engineer. Review the code for bugs and edge cases.",
 		ToolRegistry: toolReg,
+		Context:      ctxBuilder,
 	})
 	reg.Register(&agents.Executor{
 		AgentID: "agent-recovery",
@@ -119,6 +128,7 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 		Provider:  prov,
 		SystemPrompt: "You are an expert Recovery Agent. Analyze the error and fix it.",
 		ToolRegistry: toolReg,
+		Context:      ctxBuilder,
 	})
 	reg.Register(&agents.Executor{
 		AgentID: "agent-developer",

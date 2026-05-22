@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	ctxbuilder "autodev/internal/context"
 	"autodev/internal/core"
 	"autodev/internal/llm"
 	"autodev/internal/tools"
@@ -17,7 +18,8 @@ type Executor struct {
 	Provider     llm.Provider
 	SystemPrompt string
 	ToolRegistry *tools.Registry
-	
+	Context      *ctxbuilder.Builder
+
 	// MaxToolCalls limits the number of tool calls per execution
 	MaxToolCalls int
 }
@@ -35,23 +37,27 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 		e.MaxToolCalls = 10
 	}
 
-	// 1. Construct Messages
-	messages := make([]core.Message, 0)
-	messages = append(messages, core.Message{
-		Role:    "system",
-		Content: e.SystemPrompt,
-	})
+	var messages []core.Message
+	var err error
 
-	// Append history from previous agents
-	for _, msg := range input.History {
-		messages = append(messages, msg)
+	// 1. Construct Context via ContextBuilder (handles tokenization & files)
+	if e.Context != nil {
+		messages, err = e.Context.Build(
+			input.TaskDescription,
+			e.SystemPrompt,
+			input.History,
+			input.Files,
+		)
+	} else {
+		// Fallback: simple message construction
+		messages = append(messages, core.Message{Role: "system", Content: e.SystemPrompt})
+		messages = append(messages, input.History...)
+		messages = append(messages, core.Message{Role: "user", Content: input.TaskDescription})
 	}
 
-	// Append current task
-	messages = append(messages, core.Message{
-		Role:    "user",
-		Content: input.TaskDescription,
-	})
+	if err != nil {
+		return nil, fmt.Errorf("context build failed: %w", err)
+	}
 
 	var toolsList []core.Tool
 	if e.ToolRegistry != nil {
@@ -60,7 +66,7 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 
 	finalContent := ""
 
-	// Tool Call Loop
+	// 2. Tool Call Loop
 	for i := 0; i < e.MaxToolCalls; i++ {
 		resp, err := e.Provider.Chat(ctx, messages, toolsList)
 		if err != nil {
@@ -87,17 +93,17 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 				result = `{"error": "No tool registry available"}`
 			}
 
-			// Add the assistant message that triggered the tool call
+			// Add assistant message with tool_calls stub (optional in some APIs, but required for context)
 			messages = append(messages, core.Message{
 				Role:    "assistant",
 				Content: "", // Content is usually empty when tool_calls are present
 			})
 
-			// Add the tool result message
+			// Add tool result message
 			if execErr != nil {
 				result = fmt.Sprintf(`{"error": "%s"}`, execErr.Error())
 			}
-			
+
 			messages = append(messages, core.Message{
 				Role:    "tool",
 				Content: result,

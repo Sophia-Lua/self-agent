@@ -1516,11 +1516,47 @@ func (sm *StateMachine) Execute(ctx context.Context, task *Task) error {
 }
 ```
 
-## 7. CLI 与工具集成 (Tools Integration)
+## 7. 上下文与工具集成 (Context & Tools Integration)
 
-### 7.1 Agent Executor 与 Tool Loop (`internal/agents/executor.go`)
+### 7.1 ContextBuilder 智能上下文 (`internal/context/builder.go`)
 
-Agent 现在具备循环执行 LLM 调用的能力。当 LLM 返回 `tool_calls` 时，Executor 会自动解析、执行并将结果反馈给 LLM。
+ContextBuilder 负责构建发送给 LLM 的 Prompt 上下文，通过 Token 估算和截断策略，确保输入不超过模型 Context Window。
+
+```go
+type Builder struct {
+	MaxTokens      int
+	TokenEstimator func(text string) int
+}
+
+func (b *Builder) Build(task string, systemPrompt string, history []core.Message, files map[string]string) ([]core.Message, error) {
+	// 1. History tokens
+	// 2. File injection:
+	//    - If file size <= remaining budget: Include full content.
+	//    - If file size > remaining budget: Include first X chars + truncation notice.
+	// 3. Append Task
+	return messages, nil
+}
+```
+
+- **特性**: 支持可配置的 `MaxTokens`；内置 `TokenEstimator` (估算比例 4:1)。
+- **优势**: 防止因文件过大导致 LLM 报错 (Context Length Exceeded)。
+
+### 7.2 Agent Executor 与工具循环 (Tool Loop) (`internal/agents/executor.go`)
+
+Agent 利用 ContextBuilder 构建上下文，并具备循环执行 LLM 调用的能力。当 LLM 返回 `tool_calls` 时，Executor 会自动解析、执行并将结果反馈给 LLM。
+
+```go
+func (e *Executor) Execute(...) {
+    messages, _ := e.Context.Build(...)
+    for i := 0; i < MaxToolCalls; i++ {
+        resp := e.Provider.Chat(messages, tools)
+        for _, call := range resp.ToolCalls {
+             res := e.ToolRegistry.Execute(call)
+             // Append result to messages and continue loop
+        }
+    }
+}
+```
 
 ```go
 type Executor struct {
@@ -1571,10 +1607,17 @@ RegisterFileTools(reg) {
 }
 ```
 
-### 7.3 状态机验证 (`internal/llm/mock.go`)
+### 7.3 工具注册与执行 (`internal/tools`)
+
+提供统一的核心工具注册表，支持 OpenAI 兼容的工具格式定义。
+
+- `registry.go`: 统一管理 `Tool Definition` 与 `Logic Func`。
+- `fs.go`: 实现了 `write_file` 等基础工具。
+
+### 7.4 Mock 测试与状态机验证 (`internal/llm/mock.go`)
 
 实现了一个带有故障注入能力的 Mock LLM Provider，专门用于验证 Pipeline 的状态机流转。
-- **特性**: 支持 `FailCount` 配置，模拟第 N 次调用失败；支持模拟 Mock Tool Calls。
+- **特性**: 支持 `FailCount` 配置，模拟第 N 次调用失败；支持模拟 `Mock ToolCalls` 返回。
 - **流程验证**: Parser 失败后触发 Recovery Agent，恢复成功后自动回到 Developing 阶段，最终进入 Completed。
 
 
