@@ -22,20 +22,24 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message) (string, error) {
+func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message, tools []core.Tool) (*core.AgentOutput, error) {
 	reqBody := map[string]any{
 		"model":    p.Model,
 		"messages": messages,
 	}
 
+	if len(tools) > 0 {
+		reqBody["tools"] = tools
+	}
+
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
@@ -44,35 +48,46 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message) (str
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API error: %s - %s", resp.Status, string(body))
+		return nil, fmt.Errorf("API error: %s - %s", resp.Status, string(body))
 	}
 
 	var result struct {
 		Choices []struct {
-			Message core.Message `json:"message"`
+			Message struct {
+				Content   string            `json:"content"`
+				ToolCalls []core.ToolCall   `json:"tool_calls"`
+			} `json:"message"`
 		} `json:"choices"`
+		Usage core.Usage `json:"usage"`
 		Error *struct {
 			Message string `json:"message"`
 		} `json:"error"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if result.Error != nil {
-		return "", fmt.Errorf("API Error: %s", result.Error.Message)
+		return nil, fmt.Errorf("API Error: %s", result.Error.Message)
 	}
 
 	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("empty response")
+		return nil, fmt.Errorf("empty response")
 	}
 
-	return result.Choices[0].Message.Content, nil
+	choice := result.Choices[0]
+	output := &core.AgentOutput{
+		Content:   choice.Message.Content,
+		ToolCalls: choice.Message.ToolCalls,
+		Usage:     result.Usage,
+	}
+
+	return output, nil
 }

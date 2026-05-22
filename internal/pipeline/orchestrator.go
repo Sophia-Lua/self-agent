@@ -8,7 +8,6 @@ import (
 	"autodev/internal/agents"
 	"autodev/internal/core"
 	"autodev/internal/events"
-	"autodev/internal/llm"
 	"autodev/internal/memory"
 	"autodev/internal/session"
 )
@@ -17,7 +16,6 @@ import (
 type Orchestrator struct {
 	state      core.PipelineState
 	cfg        *core.Config
-	provider   llm.Provider
 	memory     *memory.Store
 	bus        events.Bus
 	registry   *agents.Registry
@@ -31,11 +29,10 @@ type Orchestrator struct {
 }
 
 // New creates a new Pipeline Orchestrator.
-func New(cfg *core.Config, memory *memory.Store, provider llm.Provider, bus events.Bus, reg *agents.Registry) *Orchestrator {
+func New(cfg *core.Config, memory *memory.Store, bus events.Bus, reg *agents.Registry) *Orchestrator {
 	sessMgr := session.New(cfg.WorkDir)
 	return &Orchestrator{
 		cfg:        cfg,
-		provider:   provider,
 		memory:     memory,
 		bus:        bus,
 		registry:   reg,

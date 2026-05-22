@@ -567,7 +567,7 @@ const (
 
 ### 4.2 编排器核心逻辑
 
-Orchestrator 维护当前状态并负责将任务传递给注册的 Agent。
+Orchestrator 维护当前状态并负责将任务传递给注册的 Agent。Agent 内部已经持有 Provider 引用。
 
 ```go
 package pipeline
@@ -577,10 +577,15 @@ type Orchestrator struct {
     state    core.PipelineState
     config   *core.Config
     store    *memory.Store
-    llm      llm.Provider
     bus      events.Bus
     registry *agents.Registry // 包含所有可用的 Agent
 }
+
+// New 构造函数不再需要传入 Provider，因为 Agent 已经自带。
+func New(cfg *core.Config, memory *memory.Store, bus events.Bus, reg *agents.Registry) *Orchestrator {
+    // ...
+}
+```
 
 func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output, error) {
     o.transition(core.StateParsing)
@@ -1511,59 +1516,123 @@ func (sm *StateMachine) Execute(ctx context.Context, task *Task) error {
 }
 ```
 
-## 7. CLI 与配置实现
+## 7. CLI 与工具集成 (Tools Integration)
 
-### 7.1 Cobra 入口 (`cmd/autodev/main.go`)
+### 7.1 Agent Executor 与 Tool Loop (`internal/agents/executor.go`)
+
+Agent 现在具备循环执行 LLM 调用的能力。当 LLM 返回 `tool_calls` 时，Executor 会自动解析、执行并将结果反馈给 LLM。
 
 ```go
-package main
-
-func main() {
-	var provider, model, apiKey, agentsDir string
-	
-	var runCmd = &cobra.Command{
-		Use:   "run [task]",
-		Short: "Execute a development task",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPipeline(args[0], provider, model, apiKey, agentsDir)
-		},
-	}
-
-	runCmd.Flags().StringVar(&provider, "provider", "openai", "LLM Provider (openai)")
-	runCmd.Flags().StringVar(&model, "model", "gpt-4o", "LLM Model")
-	runCmd.Flags().StringVar(&apiKey, "api-key", "", "API Key (or OPENAI_API_KEY env)")
-	runCmd.Flags().StringVar(&agentsDir, "agents-dir", "./agents", "Custom agents YAML dir")
-
-	rootCmd.AddCommand(runCmd)
-	_ = rootCmd.Execute()
+type Executor struct {
+    Provider     llm.Provider
+    ToolRegistry *tools.Registry
+    // ...
 }
 
-func runPipeline(task, provider, model, apiKey, agentsDir string) error {
-    // ...
+func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output, error) {
+    // ... 构建消息
+    for i := 0; i < e.MaxToolCalls; i++ {
+        resp, _ := e.Provider.Chat(ctx, messages, e.ToolRegistry.List())
+        
+        if len(resp.ToolCalls) == 0 { break }
+
+        // 执行工具并更新消息历史
+        for _, call := range resp.ToolCalls {
+            res := e.ToolRegistry.Execute(ctx, call)
+            messages = append(messages, core.Message{Role: "assistant", Content: ""}, core.Message{Role: "tool", Content: res})
+        }
+    }
+    return &core.Output{Status: core.StatusSuccess, Message: finalContent}, nil
+}
+```
+
+### 7.2 工具注册与执行 (`internal/tools`)
+
+提供统一的核心工具注册表，支持 OpenAI 兼容的工具格式定义。
+
+```go
+// tools/registry.go
+type Registry struct {
+    tools   map[string]core.Tool
+    logic   map[string]func(ctx context.Context, args map[string]any) (any, error)
+}
+
+func (r *Registry) Register(tool core.Tool, exec func(...)) {
+    r.tools[tool.Function.Name] = tool
+    r.logic[tool.Function.Name] = exec
+}
+
+// tools/fs.go - 示例：文件工具
+RegisterFileTools(reg) {
+    reg.Register(core.Tool{...}, func(ctx, args) {
+        path := args["path"].(string)
+        // 写文件逻辑...
+    })
 }
 ```
 
 ### 7.3 状态机验证 (`internal/llm/mock.go`)
 
 实现了一个带有故障注入能力的 Mock LLM Provider，专门用于验证 Pipeline 的状态机流转。
-- **特性**: 支持 `FailCount` 配置，模拟第 N 次调用失败。
+- **特性**: 支持 `FailCount` 配置，模拟第 N 次调用失败；支持模拟 Mock Tool Calls。
 - **流程验证**: Parser 失败后触发 Recovery Agent，恢复成功后自动回到 Developing 阶段，最终进入 Completed。
 
 
-### 7.2 全局配置 (`internal/core/config.go`)
+### 7.3 CLI 入口 (`cmd/autodev/main.go`)
+
+```go
+package main
+
+func main() {
+	var provider, model, apiKey, agentsDir string
+	var dryRun bool
+	
+	var runCmd = &cobra.Command{
+		Use:   "run [task]",
+		Short: "Execute a development task",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			task := args[0]
+			return runPipeline(task, provider, model, apiKey, agentsDir, dryRun)
+		},
+	}
+
+	runCmd.Flags().StringVar(&provider, "provider", "openai", "LLM Provider (openai, mock)")
+	runCmd.Flags().StringVar(&model, "model", "gpt-4o", "LLM Model")
+	runCmd.Flags().StringVar(&apiKey, "api-key", "", "LLM API Key (or set OPENAI_API_KEY)")
+	runCmd.Flags().StringVar(&agentsDir, "agents-dir", "./agents", "Custom agents YAML dir")
+	runCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Use mock LLM provider to test workflow")
+
+	rootCmd.AddCommand(runCmd)
+	_ = rootCmd.Execute()
+}
+
+func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool) error {
+    // ...
+    // 动态注册 Provider 和 Tools
+    if dryRun {
+        prov = &llm.MockProvider{}
+    } else if provider == "openai" {
+        prov = &llm.OpenAIProvider{...}
+    }
+    // ...
+}
+```
+
+### 7.4 全局配置 (`internal/core/config.go`)
 
 ```go
 package core
 
 type Config struct {
-	WorkDir   string
-	DataDir   string
-	MemoryDB  string
-	Provider  string
-	Model     string
+	WorkDir   string `yaml:"work_dir"`
+	DataDir   string `yaml:"data_dir"`
+	MemoryDB  string `yaml:"memory_db"`
+	Provider  string `yaml:"provider"`
+	Model     string `yaml:"model"`
 }
 ```
+
   db_path: ~/.autodev/session.db
   auto_save: true
   checkpoint_interval: 60s

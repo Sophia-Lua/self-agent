@@ -27,12 +27,6 @@ type Usage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-// LLMProvider abstracts the underlying LLM API.
-type LLMProvider interface {
-	Name() string
-	Chat(ctx context.Context, messages []Message, tools []Tool) (*Output, error)
-}
-
 // Tool defines an executable function available to the LLM.
 type Tool struct {
 	Type     string       `json:"type"`
@@ -43,4 +37,23 @@ type ToolFunction struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
+}
+
+// ToolExecutor handles the execution of ToolCalls.
+type ToolExecutor interface {
+	Execute(ctx context.Context, call ToolCall) (string, error)
+}
+
+// LLMProvider abstracts the underlying LLM API.
+// Chat returns the full response content and any triggered ToolCalls.
+type LLMProvider interface {
+	Name() string
+	Chat(ctx context.Context, messages []Message, tools []Tool) (*AgentOutput, error)
+}
+
+// AgentOutput represents the LLM response.
+type AgentOutput struct {
+	Content   string
+	ToolCalls []ToolCall
+	Usage     Usage
 }

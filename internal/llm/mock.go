@@ -18,7 +18,7 @@ func (p *MockProvider) Name() string {
 	return "mock"
 }
 
-func (p *MockProvider) Chat(ctx context.Context, messages []core.Message) (string, error) {
+func (p *MockProvider) Chat(ctx context.Context, messages []core.Message, tools []core.Tool) (*core.AgentOutput, error) {
 	p.callCount++
 	
 	// Simulate different responses based on the System Prompt
@@ -27,22 +27,41 @@ func (p *MockProvider) Chat(ctx context.Context, messages []core.Message) (strin
 	// Trigger failure on the first call if configured
 	if p.callCount <= p.FailCount {
 		if strings.Contains(systemMsg.Content, "Lead Developer") || strings.Contains(systemMsg.Content, "Coding Agent") {
-			return "", fmt.Errorf("mock llm error: rate limit exceeded or timeout")
+			return nil, fmt.Errorf("mock llm error: rate limit exceeded or timeout")
 		}
 	}
+
+	// For Mock Provider, we simulate returning a tool call if tools are present
+	if len(tools) > 0 && strings.Contains(systemMsg.Content, "Coding Agent") {
+		return &core.AgentOutput{
+			Content: "I will use the tool to write the code.",
+			ToolCalls: []core.ToolCall{
+				{
+					ID:   "call_123",
+					Type: "function",
+					Function: core.FunctionCall{
+						Name:      "write_file",
+						Arguments: `{"path": "main.py", "content": "print('Hello Snake Game')"}`,
+					},
+				},
+			},
+		}, nil
+	}
 	
-	var response string
+	var content string
 	if strings.Contains(systemMsg.Content, "Lead Developer") {
-		response = "[Parser] I will analyze the request and break it down."
+		content = "[Parser] I will analyze the request and break it down."
 	} else if strings.Contains(systemMsg.Content, "Coding Agent") {
-		response = "[Developer] I have generated the necessary code: `print('hello world')`"
+		content = "[Developer] I have generated the necessary code: `print('hello world')`"
 	} else if strings.Contains(systemMsg.Content, "QA Engineer") {
-		response = "[Tester] All tests passed successfully."
+		content = "[Tester] All tests passed successfully."
 	} else if strings.Contains(systemMsg.Content, "Recovery Agent") {
-		response = "[Recovery] I have fixed the issue by adjusting the prompt."
+		content = "[Recovery] I have fixed the issue by adjusting the prompt."
 	} else {
-		response = fmt.Sprintf("Ack: %s", systemMsg.Content)
+		content = fmt.Sprintf("Ack: %s", systemMsg.Content)
 	}
 
-	return response, nil
+	return &core.AgentOutput{
+		Content: content,
+	}, nil
 }

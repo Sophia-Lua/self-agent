@@ -13,6 +13,7 @@ import (
 	"autodev/internal/memory"
 	"autodev/internal/pipeline"
 	"autodev/internal/registry"
+	"autodev/internal/tools"
 
 	"github.com/spf13/cobra"
 )
@@ -82,16 +83,42 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 	bus := events.NewInMemoryBus()
 	cfg := &core.Config{ WorkDir: "." }
 
-	// Load Agents
-	reg := agents.NewRegistry()
-	
+	toolReg := tools.New()
+	tools.RegisterFileTools(toolReg)
+
 	// Register Built-in Agents
+	reg := agents.NewRegistry()
 	reg.Register(&agents.Executor{
 		AgentID: "agent-parser",
-		AgentRole:       core.RoleParser,
+		AgentRole: core.RoleParser,
 		AgentDesc: "Parses user intent into structured development tasks",
-		Provider:   prov,
+		Provider:  prov,
 		SystemPrompt: "You are an expert Lead Developer. Analyze the request and outline the technical steps required.",
+		ToolRegistry: toolReg,
+	})
+	reg.Register(&agents.Executor{
+		AgentID: "agent-developer",
+		AgentRole: core.RoleDeveloper,
+		AgentDesc: "Generates code based on structured tasks",
+		Provider:  prov,
+		SystemPrompt: "You are an expert AI Coding Agent. Write clean, efficient, and tested Go code.",
+		ToolRegistry: toolReg,
+	})
+	reg.Register(&agents.Executor{
+		AgentID: "agent-tester",
+		AgentRole: core.RoleTester,
+		AgentDesc: "Validates code correctness",
+		Provider:  prov,
+		SystemPrompt: "You are an expert QA Engineer. Review the code for bugs and edge cases.",
+		ToolRegistry: toolReg,
+	})
+	reg.Register(&agents.Executor{
+		AgentID: "agent-recovery",
+		AgentRole: core.RoleRecovery,
+		AgentDesc: "Attempts to fix task failures",
+		Provider:  prov,
+		SystemPrompt: "You are an expert Recovery Agent. Analyze the error and fix it.",
+		ToolRegistry: toolReg,
 	})
 	reg.Register(&agents.Executor{
 		AgentID: "agent-developer",
@@ -121,7 +148,7 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 	}
 
 	// Create Orchestrator
-	orch := pipeline.New(cfg, store, prov, bus, reg)
+	orch := pipeline.New(cfg, store, bus, reg)
 
 	// Execute
 	ctx := context.Background()
