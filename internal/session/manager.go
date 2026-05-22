@@ -2,8 +2,10 @@ package session
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
-	"time"
+	"strings"
+	"sync"
 
 	"autodev/internal/core"
 )
@@ -11,25 +13,59 @@ import (
 // Manager handles saving and restoring workspace snapshots.
 type Manager struct {
 	workDir   string
+	mu        sync.Mutex
 	snapshots []*core.Snapshot
 }
 
 // New creates a new Session Manager.
 func New(workDir string) *Manager {
 	return &Manager{
-		workDir:   workDir,
+		workDir:   filepath.Clean(workDir),
 		snapshots: make([]*core.Snapshot, 0),
 	}
 }
 
-// Snapshot captures the current state of the workspace (mocked for now).
+// Snapshot captures the current state of the workspace files in memory.
 func (m *Manager) CreateSnapshot(taskID string) (*core.Snapshot, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	files := make(map[string]string)
+	
+	// Walk the directory (simple mock: just read root or specific files)
+	// In a real scenario, we would traverse .autodev/ignored paths.
+	err := filepath.Walk(m.workDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if strings.Contains(path, ".git") || strings.Contains(path, ".autodev") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		
+		// Read small files only
+		if info.Size() < 1024*1024 { // 1MB limit
+			content, err := os.ReadFile(path)
+			if err == nil {
+				relPath, _ := filepath.Rel(m.workDir, path)
+				files[relPath] = string(content)
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
 	s := &core.Snapshot{
-		ID:        fmt.Sprintf("snap-%d", time.Now().UnixNano()),
+		ID:        fmt.Sprintf("snap-%d", len(m.snapshots)),
 		TaskID:    taskID,
-		Timestamp: time.Now().Format(time.RFC3339),
-		WorkDir:   filepath.Clean(m.workDir),
-		Files:     make(map[string]string), // In real impl, scan files
+		Timestamp: "now", 
+		WorkDir:   m.workDir,
+		Files:     files,
 	}
 	m.snapshots = append(m.snapshots, s)
 	return s, nil
@@ -37,9 +73,27 @@ func (m *Manager) CreateSnapshot(taskID string) (*core.Snapshot, error) {
 
 // Restore reverts the workspace to a specific snapshot.
 func (m *Manager) RestoreSnapshot(s *core.Snapshot) error {
-	// Implementation would:
-	// 1. Delete current modified files
-	// 2. Restore files from s.Files
-	// 3. Reset git state if s.GitRef is present
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if s == nil {
+		return fmt.Errorf("no snapshot provided")
+	}
+
+	for path, content := range s.Files {
+		target := filepath.Join(m.workDir, path)
+		
+		// Create directories if needed
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		
+		if err := os.WriteFile(target, []byte(content), 0644); err != nil {
+			return err
+		}
+	}
+	
+	// Note: This does not delete new files created after the snapshot.
+	// A full restore would require comparing the current state with the snapshot.
 	return nil
 }

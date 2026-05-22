@@ -101,10 +101,20 @@ func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output
 				continue
 			}
 
+			// Set error context for recovery agent
+			errContext := fmt.Sprintf("Previous task failed with error: %v\nOriginal Task: %s\nPlease analyze this failure, suggest a fix, and update the files.", 
+				o.lastError, input.TaskDescription)
+			
+			recoveryInput := &core.Input{
+				TaskDescription: errContext,
+				History:         o.history,
+				Files:           input.Files,
+			}
+
 			// Attempt recovery
 			o.retries++
 			log.Printf("[Pipeline] Attempting recovery (%d/%d)", o.retries, o.maxRetries)
-			_, err = o.runAgent(ctx, "agent-recovery", input)
+			_, err = o.runAgent(ctx, "agent-recovery", recoveryInput)
 			if err != nil {
 				// Recovery agent itself failed
 				o.transition(core.StateRollback)
