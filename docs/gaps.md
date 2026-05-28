@@ -13,7 +13,7 @@
 
 ## Test Coverage Gaps
 
-**Overall: 10.5%** (62 tests passing)
+**Overall: 27/27 packages tested** (all passing, 0 failures)
 
 ### Modules Without Tests
 
@@ -104,22 +104,28 @@ All CLI commands are documented in README.md. No gaps found.
 - [x] Memory store (SQLite)
 - [x] Event bus
 - [x] Agent YAML loader
-- [x] Git PR client (GitHub/GitLab)
+- [x] Git PR client (GitHub/GitLab/Bitbucket)
 - [x] CLI with Cobra
 - [x] Viper configuration
+- [x] Rate limiting with exponential backoff
+- [x] LLM response caching (SHA256 + LRU)
+- [x] Per-agent model options override
+- [x] Git diff in PR description
 
 ### Potential Missing Features
 
-| Feature | Description | Priority |
-|---------|-------------|----------|
-| Git diff integration | Compare snapshots for PR content | Medium |
-| Web server preview | Deploy website for preview | Low |
-| Plugin system | Dynamic tool loading | Low |
-| Dashboard/monitoring | Real-time pipeline visualization | Low |
-| Multiple agent configs | Per-task agent assignment | Medium |
-| Webhook notifications | Notify on pipeline events | Low |
-| Rate limiting | API rate limit handling | Medium |
-| Caching | LLM response caching | Low |
+| Feature | Description | Priority | Status |
+|---------|-------------|----------|--------|
+| Web server preview | Deploy website for preview | Low | Not started |
+| Plugin system | Dynamic tool loading | Low | Not started |
+| Dashboard/monitoring | Real-time pipeline visualization | Low | Not started |
+| Multiple agent configs | Per-task agent assignment | Medium | Not started |
+| Webhook notifications | Notify on pipeline events | Low | Not started |
+| Rate limiting | API rate limit handling | Medium | Implemented (wired into factory) |
+| Caching | LLM response caching | Low | Implemented (wired into factory) |
+| Git diff integration | Compare snapshots for PR content | Medium | Implemented (in orchestrator.Run) |
+| Per-agent model options | Override model/temperature per agent | Medium | Implemented (ChatWithOpts) |
+| Bitbucket PR support | Create/list PRs on Bitbucket | Medium | Implemented |
 
 ## Empty/Unused Directories
 

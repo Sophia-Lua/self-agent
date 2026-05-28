@@ -156,6 +156,10 @@ func (p *RateLimitedProvider) Name() string {
 }
 
 func (p *RateLimitedProvider) Chat(ctx context.Context, messages []core.Message, tools []core.Tool) (*core.AgentOutput, error) {
+	return p.ChatWithOptions(ctx, messages, tools, ChatOptions{})
+}
+
+func (p *RateLimitedProvider) ChatWithOptions(ctx context.Context, messages []core.Message, tools []core.Tool, opts ChatOptions) (*core.AgentOutput, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= p.maxRetries; attempt++ {
@@ -168,7 +172,13 @@ func (p *RateLimitedProvider) Chat(ctx context.Context, messages []core.Message,
 			}
 		}
 
-		output, err := p.inner.Chat(ctx, messages, tools)
+		var output *core.AgentOutput
+		var err error
+		if optsInner, ok := p.inner.(ChatWithOpts); ok {
+			output, err = optsInner.ChatWithOptions(ctx, messages, tools, opts)
+		} else {
+			output, err = p.inner.Chat(ctx, messages, tools)
+		}
 		if err == nil {
 			return output, nil
 		}

@@ -47,6 +47,7 @@ func DefaultPolicy() *Policy {
 			"wc":    true,
 			"sort":  true,
 			"uniq":  true,
+			"echo":  true,
 		},
 		AllowedDirs:    []string{"/workspace"},
 		MaxExecTime:    30 * time.Second,
@@ -327,19 +328,20 @@ func setResourceLimit(cmd *exec.Cmd, maxMemMB int) {
 		return
 	}
 
-	// Use prlimit(1) to enforce memory limits on the child process.
-	// This wraps the command: prlimit --as=<bytes> -- <original_command>
+	prlimitPath, err := exec.LookPath("prlimit")
+	if err != nil {
+		return
+	}
+
 	maxBytes := maxMemMB * 1024 * 1024
 	args := []string{
+		prlimitPath,
 		"--as=" + strconv.Itoa(maxBytes),
 		"--",
 		cmd.Path,
 	}
 	args = append(args, cmd.Args[1:]...)
 
-	cmd.Path = "prlimit"
+	cmd.Path = prlimitPath
 	cmd.Args = args
-
-	// If prlimit is not available, this will fail at exec time with
-	// "exec: prlimit: not found" — the caller will see the error.
 }
