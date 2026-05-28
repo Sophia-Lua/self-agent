@@ -22,12 +22,52 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
+func (p *OpenAIProvider) Capabilities() core.Capabilities {
+	return core.Capabilities{
+		MaxTokens:     128000,
+		ContextWindow: 128000,
+		Streaming:     true,
+		Vision:        true,
+		FunctionCall:  true,
+	}
+}
+
 func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message, tools []core.Tool) (*core.AgentOutput, error) {
-	reqBody := map[string]any{
-		"model":    p.Model,
-		"messages": messages,
+	return p.ChatWithOptions(ctx, messages, tools, ChatOptions{})
+}
+
+func (p *OpenAIProvider) ChatWithOptions(ctx context.Context, messages []core.Message, tools []core.Tool, opts ChatOptions) (*core.AgentOutput, error) {
+	openaiMessages := make([]map[string]any, len(messages))
+	for i, msg := range messages {
+		m := map[string]any{
+			"role": msg.Role,
+		}
+		if msg.Content != "" {
+			m["content"] = msg.Content
+		}
+		if msg.Role == "tool" {
+			m["tool_call_id"] = msg.ToolCallID
+			m["name"] = msg.Name
+		}
+		openaiMessages[i] = m
 	}
 
+	model := p.Model
+	if opts.Model != "" {
+		model = opts.Model
+	}
+
+	reqBody := map[string]any{
+		"model":    model,
+		"messages": openaiMessages,
+	}
+
+	if opts.Temperature > 0 {
+		reqBody["temperature"] = opts.Temperature
+	}
+	if opts.MaxTokens > 0 {
+		reqBody["max_tokens"] = opts.MaxTokens
+	}
 	if len(tools) > 0 {
 		reqBody["tools"] = tools
 	}
@@ -37,7 +77,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message, tool
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/v1/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", p.BaseURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +127,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []core.Message, tool
 		Content:   choice.Message.Content,
 		ToolCalls: choice.Message.ToolCalls,
 		Usage:     result.Usage,
+		Model:     model,
 	}
 
 	return output, nil

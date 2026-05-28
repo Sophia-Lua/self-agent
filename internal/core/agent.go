@@ -25,22 +25,35 @@ type Input struct {
 	Files           map[string]string `json:"files,omitempty"`        // Path -> Content
 	Config          map[string]any    `json:"config,omitempty"`       // Agent-specific overrides
 	MaxRetries      int               `json:"max_retries,omitempty"`
+	PRConfig        *PRConfig         `json:"pr_config,omitempty"`
 }
 
 // Output represents the standardized result returned by an agent.
 type Output struct {
-	Status       ExecutionStatus     `json:"status"`
-	Message      string              `json:"message,omitempty"`
-	ModifiedFiles map[string]string  `json:"modified_files,omitempty"` // Path -> New Content
-	NextState    PipelineState       `json:"next_state,omitempty"`     // Suggested state transition
-	Data         map[string]any      `json:"data,omitempty"`           // Arbitrary structured data
-	Error        error               `json:"-"`                        // Internal error
+	Status        ExecutionStatus     `json:"status"`
+	Message       string              `json:"message,omitempty"`
+	ModifiedFiles map[string]string   `json:"modified_files,omitempty"` // Path -> New Content
+	NextState     PipelineState       `json:"next_state,omitempty"`     // Suggested state transition
+	Data          map[string]any      `json:"data,omitempty"`           // Arbitrary structured data
+	Error         error               `json:"-"`                        // Internal error
+	PRInfo        *PRResult           `json:"pr_info,omitempty"`         // PR creation result
+}
+
+// PRResult holds the result of a PR creation operation.
+type PRResult struct {
+	URL         string `json:"url"`
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	Platform    string `json:"platform"`
+	CreatedAt   string `json:"created_at"`
 }
 
 // Message represents a single turn in the conversation history.
 type Message struct {
-	Role    string `json:"role"`    // user, assistant, system
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	Name       string `json:"name,omitempty"` // Used when role is "tool" to identify the tool name
+	ToolCallID string `json:"tool_call_id,omitempty"` // Used when role is "tool" to associate with a tool_call
 }
 
 // ExecutionStatus indicates the outcome of an agent's internal logic.

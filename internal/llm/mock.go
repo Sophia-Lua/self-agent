@@ -4,36 +4,58 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"autodev/internal/core"
 )
 
 // MockProvider is used for testing the pipeline without hitting real APIs.
 type MockProvider struct {
-	FailCount int // Number of times to fail before succeeding
-	callCount int
+	FailCount int
+	callCount atomic.Int64
 }
 
 func (p *MockProvider) Name() string {
 	return "mock"
 }
 
+func (p *MockProvider) Capabilities() core.Capabilities {
+	return core.Capabilities{
+		MaxTokens:     128000,
+		ContextWindow: 128000,
+		Streaming:     false,
+		Vision:        false,
+		FunctionCall:  true,
+	}
+}
+
 func (p *MockProvider) Chat(ctx context.Context, messages []core.Message, tools []core.Tool) (*core.AgentOutput, error) {
-	p.callCount++
-	
-	// Simulate different responses based on the System Prompt
+	return p.ChatWithOptions(ctx, messages, tools, ChatOptions{})
+}
+
+func (p *MockProvider) ChatWithOptions(ctx context.Context, messages []core.Message, tools []core.Tool, opts ChatOptions) (*core.AgentOutput, error) {
+	p.callCount.Add(1)
+
+	if len(messages) == 0 {
+		return nil, fmt.Errorf("mock llm error: messages slice is empty")
+	}
+
 	systemMsg := messages[0]
-	
-	// Trigger failure on the first call if configured
-	if p.callCount <= p.FailCount {
+
+	if p.callCount.Load() <= int64(p.FailCount) {
 		if strings.Contains(systemMsg.Content, "Lead Developer") || strings.Contains(systemMsg.Content, "Coding Agent") {
 			return nil, fmt.Errorf("mock llm error: rate limit exceeded or timeout")
 		}
 	}
 
-	// For Mock Provider, we simulate returning a tool call if tools are present
+	model := "mock-model"
+	if opts.Model != "" {
+		model = opts.Model
+	}
+
 	if len(tools) > 0 && strings.Contains(systemMsg.Content, "Coding Agent") {
 		return &core.AgentOutput{
+			Model: model,
 			Content: "I will use the tool to write the code.",
 			ToolCalls: []core.ToolCall{
 				{
@@ -62,6 +84,7 @@ func (p *MockProvider) Chat(ctx context.Context, messages []core.Message, tools 
 	}
 
 	return &core.AgentOutput{
+		Model:   model,
 		Content: content,
 	}, nil
 }

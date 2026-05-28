@@ -22,6 +22,10 @@ type Executor struct {
 
 	// MaxToolCalls limits the number of tool calls per execution
 	MaxToolCalls int
+
+	// ModelConfig specifies agent-specific model settings (optional).
+	// These override the provider's default settings at request time.
+	ModelOption llm.AgentModelOption
 }
 
 func (e *Executor) ID() string          { return e.AgentID }
@@ -40,21 +44,7 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 	var messages []core.Message
 	var err error
 
-	// 1. Construct Context via ContextBuilder (handles tokenization & files)
-	if e.Context != nil {
-		messages, err = e.Context.Build(
-			input.TaskDescription,
-			e.SystemPrompt,
-			input.History,
-			input.Files,
-		)
-	} else {
-		// Fallback: simple message construction
-		messages = append(messages, core.Message{Role: "system", Content: e.SystemPrompt})
-		messages = append(messages, input.History...)
-		messages = append(messages, core.Message{Role: "user", Content: input.TaskDescription})
-	}
-
+	messages, err = buildMessages(e, input)
 	if err != nil {
 		return nil, fmt.Errorf("context build failed: %w", err)
 	}
@@ -64,11 +54,16 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 		toolsList = e.ToolRegistry.List()
 	}
 
+	opts := llm.ChatOptions{
+		Model:       e.ModelOption.Model,
+		Temperature: e.ModelOption.Temperature,
+		MaxTokens:   e.ModelOption.MaxTokens,
+	}
+
 	finalContent := ""
 
-	// 2. Tool Call Loop
 	for i := 0; i < e.MaxToolCalls; i++ {
-		resp, err := e.Provider.Chat(ctx, messages, toolsList)
+		resp, err := chatWithOpts(e.Provider, ctx, messages, toolsList, opts)
 		if err != nil {
 			return nil, fmt.Errorf("LLM chat failed: %w", err)
 		}
@@ -77,12 +72,10 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 			finalContent = resp.Content
 		}
 
-		// If no tool calls, we are done
 		if len(resp.ToolCalls) == 0 {
 			break
 		}
 
-		// Execute tools
 		for _, call := range resp.ToolCalls {
 			var result string
 			var execErr error
@@ -93,20 +86,20 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 				result = `{"error": "No tool registry available"}`
 			}
 
-			// Add assistant message with tool_calls stub (optional in some APIs, but required for context)
 			messages = append(messages, core.Message{
 				Role:    "assistant",
-				Content: "", // Content is usually empty when tool_calls are present
+				Content: "",
 			})
 
-			// Add tool result message
 			if execErr != nil {
 				result = fmt.Sprintf(`{"error": "%s"}`, execErr.Error())
 			}
 
 			messages = append(messages, core.Message{
-				Role:    "tool",
-				Content: result,
+				Role:       "tool",
+				Name:       call.Function.Name,
+				ToolCallID: call.ID,
+				Content:    result,
 			})
 		}
 	}
@@ -115,4 +108,40 @@ func (e *Executor) Execute(ctx context.Context, input core.Input) (*core.Output,
 		Status:  core.StatusSuccess,
 		Message: finalContent,
 	}, nil
+}
+
+func buildMessages(e *Executor, input core.Input) ([]core.Message, error) {
+	if e.Context != nil {
+		maxTokens := e.Context.MaxTokens
+		if maxTokens == 0 {
+			caps := e.Provider.Capabilities()
+			maxTokens = caps.ContextWindow
+			if maxTokens == 0 {
+				maxTokens = 128000
+			}
+		}
+		safeLimit := int(float64(maxTokens) * 0.8)
+		if e.ModelOption.MaxTokens > 0 && e.ModelOption.MaxTokens < safeLimit {
+			safeLimit = e.ModelOption.MaxTokens
+		}
+
+		return e.Context.Build(
+			input.TaskDescription,
+			e.SystemPrompt,
+			input.History,
+			input.Files,
+		)
+	}
+
+	messages := append([]core.Message(nil), input.History...)
+	messages = append([]core.Message{{Role: "system", Content: e.SystemPrompt}}, messages...)
+	messages = append(messages, core.Message{Role: "user", Content: input.TaskDescription})
+	return messages, nil
+}
+
+func chatWithOpts(provider llm.Provider, ctx context.Context, messages []core.Message, tools []core.Tool, opts llm.ChatOptions) (*core.AgentOutput, error) {
+	if optsProvider, ok := provider.(llm.ChatWithOpts); ok {
+		return optsProvider.ChatWithOptions(ctx, messages, tools, opts)
+	}
+	return provider.Chat(ctx, messages, tools)
 }

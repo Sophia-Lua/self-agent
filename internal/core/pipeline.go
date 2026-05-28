@@ -1,5 +1,7 @@
 package core
 
+import "context"
+
 // PipelineState represents the current stage of the autonomous execution loop.
 type PipelineState string
 
@@ -30,17 +32,17 @@ type Snapshot struct {
 // Orchestrator defines the interface for the main pipeline execution engine.
 type Orchestrator interface {
 	// Run starts the pipeline execution for a given task.
-	Run(task string) error
-	
+	Run(ctx context.Context, input *Input) (*Output, error)
+
 	// State returns the current state of the pipeline.
 	State() PipelineState
-	
+
 	// Rollback restores the workspace to the last valid snapshot.
 	Rollback() error
-	
+
 	// Pause interrupts execution and waits for User resume.
 	Pause() error
-	
+
 	// Resume continues execution after a pause.
 	Resume() error
 }
