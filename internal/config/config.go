@@ -26,6 +26,7 @@ type Config struct {
 	Diagnosis   DiagnosisConfig     `yaml:"diagnosis"`
 	Analyzer    AnalyzerConfig      `yaml:"analyzer"`
 	Output      OutputConfig        `yaml:"output"`
+	Webhook     WebhookConfig       `yaml:"webhook"`
 }
 
 // LLMConfig defines the default LLM settings.
@@ -153,6 +154,15 @@ type OutputConfig struct {
 	LogFile string `yaml:"log_file"`
 }
 
+// WebhookConfig defines webhook notification settings.
+type WebhookConfig struct {
+	Enabled bool     `yaml:"enabled"`
+	URLs    []string `yaml:"urls"`
+	Secret  string   `yaml:"secret"`
+	Timeout string   `yaml:"timeout"`
+	Retries int      `yaml:"retries"`
+}
+
 // LoadConfig loads configuration from files and environment variables.
 func LoadConfig() (*Config, error) {
 	v := viper.New()
@@ -181,6 +191,9 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("analyzer.enabled", true)
 	v.SetDefault("output.format", "console")
 	v.SetDefault("output.log_level", "info")
+	v.SetDefault("webhook.enabled", false)
+	v.SetDefault("webhook.timeout", "10s")
+	v.SetDefault("webhook.retries", 2)
 
 	// Read config file (optional)
 	if err := v.ReadInConfig(); err != nil {

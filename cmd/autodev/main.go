@@ -20,6 +20,7 @@ import (
 	"autodev/internal/llm"
 	"autodev/internal/memory"
 	"autodev/internal/mcp"
+	"autodev/internal/notify"
 	"autodev/internal/pipeline"
 	"autodev/internal/project"
 	"autodev/internal/registry"
@@ -84,6 +85,8 @@ func main() {
 }
 
 func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, failOnce bool, mcpConfigPath string, resumeSession string, createPR bool, prTargetBranch string, prDraft bool, prReviewers string) error {
+	appCfg, _ := config.LoadConfig()
+
 	var prov llm.Provider
 
 	if dryRun || provider == "mock" {
@@ -131,8 +134,20 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 	}
 
 	bus := events.NewInMemoryBus()
-	
-	// 加载 MCP 配置
+
+	if appCfg != nil && appCfg.Webhook.Enabled && len(appCfg.Webhook.URLs) > 0 {
+		sender := notify.NewWebhookSender(notify.SenderConfig{
+			URLs:    appCfg.Webhook.URLs,
+			Secret:  appCfg.Webhook.Secret,
+			Timeout: appCfg.Webhook.Timeout,
+			Retries: appCfg.Webhook.Retries,
+		})
+		if err := sender.SubscribeAll(bus); err != nil {
+			log.Printf("[Webhook] subscribe warning: %v", err)
+		}
+	}
+
+	// Load MCP configuration
 	var mcpServers []mcp.ServerDef
 	if mcpConfigPath != "" {
 		data, err := os.ReadFile(mcpConfigPath)

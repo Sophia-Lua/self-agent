@@ -9,10 +9,12 @@ import (
 type Type string
 
 const (
-	TypeStateChange  Type = "state_change"
-	TypeAgentStart   Type = "agent_start"
+	TypeStateChange   Type = "state_change"
+	TypeAgentStart    Type = "agent_start"
 	TypeAgentComplete Type = "agent_complete"
-	TypeAgentError   Type = "agent_error"
+	TypeAgentError    Type = "agent_error"
+	TypePipelineStart Type = "pipeline_start"
+	TypePipelineEnd   Type = "pipeline_end"
 )
 
 // Event represents a system occurrence.

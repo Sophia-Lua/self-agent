@@ -69,6 +69,13 @@ func (o *Orchestrator) WithAutoCheckpoint(enabled bool) *Orchestrator {
 
 // Run starts the autonomous execution loop.
 func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output, error) {
+	o.bus.Publish(ctx, events.Event{
+		Type: events.TypePipelineStart,
+		Payload: map[string]interface{}{
+			"task": input.TaskDescription,
+		},
+	})
+
 	o.transition(core.StateParsing)
 
 	// Initialize input files from the current workspace if empty
@@ -89,6 +96,13 @@ func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output
 		select {
 		case <-ctx.Done():
 			o.transition(core.StateCancelled)
+			o.bus.Publish(ctx, events.Event{
+				Type: events.TypePipelineEnd,
+				Payload: map[string]interface{}{
+					"status": "cancelled",
+					"reason": ctx.Err().Error(),
+				},
+			})
 			return nil, ctx.Err()
 		default:
 		}
@@ -211,6 +225,19 @@ func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output
 			}
 		}
 
+		o.bus.Publish(ctx, events.Event{
+			Type: events.TypePipelineEnd,
+			Payload: map[string]interface{}{
+				"status": "completed",
+				"pr_url": func() string {
+					if output.PRInfo != nil {
+						return output.PRInfo.URL
+					}
+					return ""
+				}(),
+			},
+		})
+
 		return output, nil
 
 	case core.StateRollback:
@@ -221,6 +248,15 @@ func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output
 				log.Println("Workspace restored to pre-parsing state")
 			}
 		}
+
+		o.bus.Publish(ctx, events.Event{
+			Type: events.TypePipelineEnd,
+			Payload: map[string]interface{}{
+				"status": "failed",
+				"error":  o.lastError,
+			},
+		})
+
 		return nil, fmt.Errorf("pipeline failed: %v", o.lastError)
 		}
 	}
