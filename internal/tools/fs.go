@@ -33,9 +33,15 @@ func RegisterFileTools(reg *Registry, workDir string) {
 			return nil, ErrMissingPath
 		}
 		
-		// Resolve path if relative
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(workDir, path)
+		}
+
+		// Clean the path and verify it stays within workDir
+		path = filepath.Clean(path)
+		absWorkDir, _ := filepath.Abs(workDir)
+		if !strings.HasPrefix(path, absWorkDir) {
+			return nil, fmt.Errorf("path %q is outside the allowed working directory", args["path"])
 		}
 
 		// Create parent directories if needed
@@ -76,6 +82,13 @@ func RegisterFileTools(reg *Registry, workDir string) {
 			path = filepath.Join(workDir, path)
 		}
 
+		// Clean the path and verify it stays within workDir
+		path = filepath.Clean(path)
+		absWorkDir, _ := filepath.Abs(workDir)
+		if !strings.HasPrefix(path, absWorkDir) {
+			return nil, fmt.Errorf("path %q is outside the allowed working directory", args["path"])
+		}
+
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
@@ -108,6 +121,13 @@ func RegisterFileTools(reg *Registry, workDir string) {
 
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(workDir, path)
+		}
+
+		// Clean the path and verify it stays within workDir
+		path = filepath.Clean(path)
+		absWorkDir, _ := filepath.Abs(workDir)
+		if !strings.HasPrefix(path, absWorkDir) {
+			return nil, fmt.Errorf("path %q is outside the allowed working directory", args["path"])
 		}
 
 		entries, err := os.ReadDir(path)
@@ -170,6 +190,13 @@ func RegisterFileTools(reg *Registry, workDir string) {
 
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(workDir, path)
+		}
+
+		// Clean the path and verify it stays within workDir
+		path = filepath.Clean(path)
+		absWorkDir, _ := filepath.Abs(workDir)
+		if !strings.HasPrefix(path, absWorkDir) {
+			return nil, fmt.Errorf("path %q is outside the allowed working directory", args["path"])
 		}
 
 		namePattern, _ := args["name_pattern"].(string)

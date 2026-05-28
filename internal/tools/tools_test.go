@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"autodev/internal/core"
@@ -338,5 +339,182 @@ func TestRegisterMultipleTools(t *testing.T) {
 	tools := r.List()
 	if len(tools) != 10 {
 		t.Errorf("expected 10 tools, got %d", len(tools))
+	}
+}
+
+func TestPathTraversalPrevention(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	attempts := []string{
+		"../etc/passwd",
+		"../../etc/shadow",
+		"foo/../../etc/hosts",
+	}
+
+	for _, path := range attempts {
+		call := core.ToolCall{
+			ID:   "call-1",
+			Type: "function",
+			Function: core.FunctionCall{
+				Name:      "read_file",
+				Arguments: `{"path": "` + path + `"}`,
+			},
+		}
+
+		_, err := r.Execute(context.Background(), call)
+		if err == nil {
+			t.Errorf("expected error for path traversal attempt: %s", path)
+		}
+	}
+}
+
+func TestWriteFileTraversalPrevention(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	call := core.ToolCall{
+		ID:   "call-1",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      "write_file",
+			Arguments: `{"path": "../escape.txt", "content": "escaped"}`,
+		},
+	}
+
+	_, err := r.Execute(context.Background(), call)
+	if err == nil {
+		t.Error("expected error for write path traversal attempt")
+	}
+}
+
+func TestListFilesWithPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	// Create test files
+	os.WriteFile(filepath.Join(tmpDir, "a.go"), []byte(""), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "b.py"), []byte(""), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "c.md"), []byte(""), 0644)
+
+	call := core.ToolCall{
+		ID:   "call-1",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      "list_files",
+			Arguments: `{"path": ".", "pattern": "*.go"}`,
+		},
+	}
+
+	result, err := r.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("list_files failed: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	count, _ := m["count"].(float64)
+	if int(count) != 1 {
+		t.Errorf("expected 1 .go file, got %d", int(count))
+	}
+}
+
+func TestSearchFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	os.WriteFile(filepath.Join(tmpDir, "hello.go"), []byte("package main\nfunc Hello() { }"), 0644)
+	os.WriteFile(filepath.Join(tmpDir, "other.py"), []byte("def other(): pass"), 0644)
+
+	// Search by name pattern
+	call := core.ToolCall{
+		ID:   "call-1",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      "search_files",
+			Arguments: `{"path": ".", "name_pattern": "*.go"}`,
+		},
+	}
+
+	result, err := r.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("search_files failed: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	count, _ := m["count"].(float64)
+	if int(count) != 1 {
+		t.Errorf("expected 1 .go file, got %d", int(count))
+	}
+}
+
+func TestExecuteCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	call := core.ToolCall{
+		ID:   "call-1",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      "execute_command",
+			Arguments: `{"command": "echo hello"}`,
+		},
+	}
+
+	result, err := r.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("execute_command failed: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	output, _ := m["output"].(string)
+	if strings.TrimSpace(output) != "hello" {
+		t.Errorf("expected 'hello', got %q", output)
+	}
+}
+
+func TestExecuteCommandBadExitCode(t *testing.T) {
+	tmpDir := t.TempDir()
+	r := New()
+	RegisterFileTools(r, tmpDir)
+
+	call := core.ToolCall{
+		ID:   "call-1",
+		Type: "function",
+		Function: core.FunctionCall{
+			Name:      "execute_command",
+			Arguments: `{"command": "exit 42"}`,
+		},
+	}
+
+	result, err := r.Execute(context.Background(), call)
+	if err != nil {
+		t.Fatalf("execute_command should not error on non-zero exit: %v", err)
+	}
+
+	var m map[string]any
+	if err := json.Unmarshal([]byte(result), &m); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	exitCode, _ := m["exit_code"].(float64)
+	if int(exitCode) != 42 {
+		t.Errorf("expected exit code 42, got %d", int(exitCode))
 	}
 }
