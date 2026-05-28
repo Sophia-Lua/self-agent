@@ -1,0 +1,103 @@
+# autodev.yaml - Example Configuration
+# Copy this file to your project root or ~/.autodev/autodev.yaml
+
+version: "1.0"
+
+# LLM Provider Configuration
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key: ${OPENAI_API_KEY}
+  base_url: ""
+
+# Model Pool for Per-Agent Model Selection
+models:
+  - name: fast
+    provider: openai
+    model: gpt-4o-mini
+  - name: reasoning
+    provider: claude
+    model: claude-sonnet-4-20250514
+
+# Per-Agent Settings
+agents:
+  parser:
+    model: reasoning
+    temperature: 0.3
+    max_tokens: 4096
+    enabled: true
+  developer:
+    model: reasoning
+    temperature: 0.3
+    max_tokens: 8192
+    enabled: true
+  tester:
+    model: fast
+    temperature: 0.1
+    max_tokens: 4096
+    enabled: true
+  checker:
+    model: fast
+    temperature: 0.2
+    max_tokens: 4096
+    enabled: true
+  recovery:
+    model: reasoning
+    temperature: 0.5
+    max_tokens: 4096
+    enabled: true
+
+# Memory Store (SQLite)
+memory:
+  enabled: true
+  db_path: ~/.autodev/memory.db
+
+# Session Checkpoints
+session:
+  enabled: true
+  db_path: ~/.autodev/sessions.db
+  auto_save: true
+
+# Webhook Notifications
+webhook:
+  enabled: false
+  urls:
+    - https://hooks.example.com/autodev
+  secret: your-webhook-secret
+  timeout: 10s
+  retries: 2
+
+# Audit Logging
+audit:
+  enabled: true
+  db_path: ~/.autodev/audit.db
+  retention_days: 30
+
+# Sandbox Execution
+sandbox:
+  enabled: false
+  max_memory_mb: 512
+  max_cpu_time_seconds: 30
+  network_access: false
+  allowed_commands:
+    - go
+    - npm
+    - node
+    - make
+
+# Timeout Policies
+timeout:
+  task_max_duration: "30m"
+  step_max_duration: "5m"
+  llm_api_timeout: "60s"
+
+# Progress Reporting
+progress:
+  enabled: true
+  format: terminal
+  verbose: false
+
+# Output
+output:
+  format: console
+  log_level: info
