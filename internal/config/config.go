@@ -31,10 +31,15 @@ type Config struct {
 
 // LLMConfig defines the default LLM settings.
 type LLMConfig struct {
-	Provider string `yaml:"provider"`
-	Model    string `yaml:"model"`
-	APIKey   string `yaml:"api_key"`
-	BaseURL  string `yaml:"base_url"`
+	Provider       string `yaml:"provider"`
+	Model          string `yaml:"model"`
+	APIKey         string `yaml:"api_key"`
+	BaseURL        string `yaml:"base_url"`
+	EnableCache    bool   `yaml:"enable_cache"`
+	MaxCacheSize   int    `yaml:"max_cache_size"`
+	EnableRateLimit bool  `yaml:"enable_rate_limit"`
+	MaxRetries     int    `yaml:"max_retries"`
+	BaseDelayMs    int    `yaml:"base_delay_ms"`
 }
 
 // ModelEntry defines a specific model in the model pool.
@@ -174,6 +179,11 @@ func LoadConfig() (*Config, error) {
 	// Set defaults for required fields
 	v.SetDefault("llm.provider", "openai")
 	v.SetDefault("llm.model", "gpt-4o")
+	v.SetDefault("llm.enable_cache", false)
+	v.SetDefault("llm.max_cache_size", 1000)
+	v.SetDefault("llm.enable_rate_limit", false)
+	v.SetDefault("llm.max_retries", 3)
+	v.SetDefault("llm.base_delay_ms", 1000)
 	v.SetDefault("memory.enabled", true)
 	v.SetDefault("memory.db_path", "~/.autodev/memory.db")
 	v.SetDefault("session.enabled", true)

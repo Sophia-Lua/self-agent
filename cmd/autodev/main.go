@@ -118,10 +118,17 @@ func runPipeline(task, provider, model, apiKey, agentsDir string, dryRun bool, f
 		}
 
 		var err error
+		enableCache := appCfg != nil && appCfg.LLM.EnableCache
+		enableRateLimit := appCfg != nil && appCfg.LLM.EnableRateLimit
 		prov, err = llm.NewProvider(llm.ProviderConfig{
-			Provider: provider,
-			Model:    model,
-			APIKey:   apiKey,
+			Provider:       provider,
+			Model:          model,
+			APIKey:         apiKey,
+			EnableCache:    enableCache,
+			MaxCacheSize:   appCfg.LLM.MaxCacheSize,
+			EnableRateLimit: enableRateLimit,
+			MaxRetries:     appCfg.LLM.MaxRetries,
+			BaseDelayMs:    appCfg.LLM.BaseDelayMs,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to create provider: %w", err)

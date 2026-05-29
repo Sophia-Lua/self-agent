@@ -9,14 +9,18 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"autodev/internal/agents"
+	"autodev/internal/audit"
 	"autodev/internal/core"
 	"autodev/internal/events"
 	"autodev/internal/git"
 	"autodev/internal/memory"
 	"autodev/internal/parser"
+	"autodev/internal/progress"
 	"autodev/internal/session"
+	"autodev/internal/timeout"
 )
 
 // Orchestrator manages the execution of the autonomous pipeline.
@@ -25,8 +29,11 @@ type Orchestrator struct {
 	cfg        *core.Config
 	memory     *memory.Store
 	bus        events.Bus
+	auditLog   *audit.Logger
 	registry   *agents.Registry
 	snapshot   *session.Manager
+	tracker    *progress.Tracker
+	timePolicy *timeout.Policy
 	retries    int
 	maxRetries int
 	history    []core.Message
@@ -42,17 +49,29 @@ type Orchestrator struct {
 // New creates a new Pipeline Orchestrator.
 func New(cfg *core.Config, memory *memory.Store, bus events.Bus, reg *agents.Registry) *Orchestrator {
 	sessMgr := session.New(cfg.WorkDir)
-	return &Orchestrator{
+	o := &Orchestrator{
 		cfg:            cfg,
 		memory:         memory,
 		bus:            bus,
+		auditLog:       audit.New(),
 		registry:       reg,
 		snapshot:       sessMgr,
+		tracker:        progress.New("", "Pipeline"),
+		timePolicy:     timeout.DefaultPolicy(),
 		state:          core.StatePending,
 		maxRetries:     3,
 		history:        make([]core.Message, 0),
 		autoCheckpoint: true,
 	}
+
+	// Register standard pipeline phases for progress tracking
+	o.tracker.RegisterPhase("agent-parser", "Decompose task into subtasks")
+	o.tracker.RegisterPhase("agent-developer", "Implement the solution")
+	o.tracker.RegisterPhase("agent-tester", "Write and execute tests")
+	o.tracker.RegisterPhase("agent-checker", "Review code quality")
+	o.tracker.RegisterPhase("agent-recovery", "Attempt to fix failures")
+
+	return o
 }
 
 // WithSessionID sets the session ID for checkpoint tracking.
@@ -64,6 +83,12 @@ func (o *Orchestrator) WithSessionID(id string) *Orchestrator {
 // WithAutoCheckpoint enables/disables automatic checkpoint saving.
 func (o *Orchestrator) WithAutoCheckpoint(enabled bool) *Orchestrator {
 	o.autoCheckpoint = enabled
+	return o
+}
+
+// WithTimeout sets the timeout policy for agent execution.
+func (o *Orchestrator) WithTimeout(policy *timeout.Policy) *Orchestrator {
+	o.timePolicy = policy
 	return o
 }
 
@@ -198,14 +223,21 @@ func (o *Orchestrator) Run(ctx context.Context, input *core.Input) (*core.Output
 
 	case core.StateCompleted:
 		o.saveCheckpoint(input)
-		// Save run result to memory
-		if o.memory != nil {
-			_ = o.memory.Save(context.TODO(), "default", "last_result", "completed")
-		}
 
 		output := &core.Output{
 			Status:  core.StatusSuccess,
 			Message: "Pipeline completed successfully",
+		}
+
+		// Save run result to memory
+		if o.memory != nil {
+			resultSummary := fmt.Sprintf("Pipeline completed. Files: %d, PR: %s", len(input.Files), func() string {
+				if output.PRInfo != nil {
+					return output.PRInfo.URL
+				}
+				return "none"
+			}())
+			_ = o.memory.Save(context.TODO(), "default", "last_result", resultSummary)
 		}
 
 		// Create PR if configured
@@ -269,6 +301,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, agentID string, input *core
 		return nil, fmt.Errorf("agent not found: %s", agentID)
 	}
 
+	// Apply per-agent timeout from the policy
+	agentCtx, cancel := o.timePolicy.WithTimeout(ctx, timeout.ScopeAgent)
+	defer cancel()
+
+	// Start progress tracking for this agent phase
+	o.tracker.StartPhase(agentID)
+	defer o.tracker.CompletePhase(agentID, 0)
+
 	o.bus.Publish(ctx, events.Event{
 		Type:  events.TypeAgentStart,
 		Agent: agentID,
@@ -284,12 +324,16 @@ func (o *Orchestrator) runAgent(ctx context.Context, agentID string, input *core
 		Files:           input.Files,
 	}
 
-	output, err := agent.Execute(ctx, agentInput)
+	startTime := time.Now()
+	output, err := agent.Execute(agentCtx, agentInput)
+	duration := time.Since(startTime)
+
 	if err != nil {
+		o.tracker.FailPhase(agentID, err.Error())
 		o.bus.Publish(ctx, events.Event{
 			Type:  events.TypeAgentError,
 			Agent: agentID,
-			Payload: map[string]interface{}{"error": err.Error()},
+			Payload: map[string]interface{}{"error": err.Error(), "duration_ms": duration.Milliseconds()},
 		})
 		o.lastError = err
 		return nil, err
@@ -330,6 +374,7 @@ func (o *Orchestrator) transition(s core.PipelineState) {
 			"to":   string(s),
 		},
 	})
+	o.auditLog.StateChange("orchestrator", string(prev), string(s))
 	log.Printf("[Pipeline] Transitioned %s -> %s", prev, s)
 }
 
@@ -341,6 +386,8 @@ func (o *Orchestrator) saveCheckpoint(input *core.Input) {
 
 	if err := o.snapshot.AutoCheckpoint(o.sessionID, o.state, input, o.history, o.retries); err != nil {
 		log.Printf("[Pipeline] Checkpoint save warning: %v", err)
+	} else {
+		o.auditLog.Snapshot("orchestrator", o.sessionID, len(input.Files))
 	}
 }
 
