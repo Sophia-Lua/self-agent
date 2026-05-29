@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"autodev/internal/core"
 )
@@ -63,7 +64,7 @@ func (m *Manager) CreateSnapshot(taskID string) (*core.Snapshot, error) {
 	s := &core.Snapshot{
 		ID:        fmt.Sprintf("snap-%d", len(m.snapshots)),
 		TaskID:    taskID,
-		Timestamp: "now", 
+		Timestamp: time.Now().Format(time.RFC3339),
 		WorkDir:   m.workDir,
 		Files:     files,
 	}

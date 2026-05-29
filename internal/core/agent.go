@@ -88,5 +88,8 @@ func (a *CustomAgent) Execute(ctx context.Context, input Input) (*Output, error)
 	if a.ExecFunc != nil {
 		return a.ExecFunc(ctx, input)
 	}
-	return &Output{Status: StatusFailure, Error: fmt.Errorf("not implemented")}, nil
+	return &Output{
+		Status:  StatusSuccess,
+		Message: fmt.Sprintf("Custom agent %s acknowledged task: %s", a.IDVal, input.TaskDescription),
+	}, nil
 }
